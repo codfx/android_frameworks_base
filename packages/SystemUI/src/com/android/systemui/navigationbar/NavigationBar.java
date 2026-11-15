@@ -16,7 +16,6 @@
 
 package com.android.systemui.navigationbar;
 
-import static com.android.systemui.statusbar.phone.panelstate.PanelExpansionStateManagerKt.STATE_CLOSED;
 import static android.app.StatusBarManager.NAVIGATION_HINT_BACK_ALT;
 import static android.app.StatusBarManager.NAVIGATION_HINT_IME_SHOWN;
 import static android.app.StatusBarManager.WINDOW_STATE_HIDDEN;
@@ -143,7 +142,7 @@ import com.android.systemui.statusbar.phone.LightBarController;
 import com.android.systemui.statusbar.phone.ShadeController;
 import com.android.systemui.statusbar.phone.StatusBar;
 import com.android.systemui.statusbar.phone.panelstate.PanelExpansionStateManager;
-import com.android.systemui.statusbar.phone.panelstate.PanelStateListener;
+import com.android.systemui.statusbar.phone.panelstate.PanelExpansionListener;
 import com.android.systemui.statusbar.policy.DeviceProvisionedController;
 import com.android.wm.shell.legacysplitscreen.LegacySplitScreen;
 import com.android.wm.shell.pip.Pip;
@@ -243,7 +242,14 @@ public class NavigationBar implements View.OnAttachStateChangeListener,
      */
     private boolean mHiddenForShade;
     private PanelExpansionStateManager mPanelExpansionStateManager;
-    private final PanelStateListener mPanelStateListener = state -> updateHiddenForShade(state);
+    // Visible shade = expanded with a non-zero fraction. The panel state alone is not enough:
+    // a pinned heads-up notification reports expanded=true (state OPENING) at fraction 0.
+    private boolean mShadeVisible;
+    private final PanelExpansionListener mPanelExpansionListener =
+            (fraction, expanded, tracking) -> {
+                mShadeVisible = expanded && fraction > 0f;
+                reevaluateHiddenForShade();
+            };
     private final StatusBarStateController.StateListener mShadeStateListener =
             new StatusBarStateController.StateListener() {
                 @Override
@@ -640,10 +646,11 @@ public class NavigationBar implements View.OnAttachStateChangeListener,
         mNavigationBarView.setComponents(mStatusBarOptionalLazy.get().get().getPanelController());
         mPanelExpansionStateManager =
                 mStatusBarOptionalLazy.get().get().getPanelExpansionStateManager();
-        mPanelExpansionStateManager.addStateListener(mPanelStateListener);
         mStatusBarStateController.addCallback(mShadeStateListener);
         mHiddenForShade = false;
-        reevaluateHiddenForShade();
+        mShadeVisible = false;
+        // also delivers the current expansion immediately
+        mPanelExpansionStateManager.addExpansionListener(mPanelExpansionListener);
         mNavigationBarView.setDisabledFlags(mDisabledFlags1);
         mNavigationBarView.setOnVerticalChangedListener(this::onVerticalChanged);
         mNavigationBarView.setOnTouchListener(this::onNavigationTouch);
@@ -730,7 +737,7 @@ public class NavigationBar implements View.OnAttachStateChangeListener,
         mNavBarHelper.removeNavTaskStateUpdater(mNavbarTaskbarStateUpdater);
         mPipOptional.ifPresent(mNavigationBarView::removePipExclusionBoundsChangeListener);
         if (mPanelExpansionStateManager != null) {
-            mPanelExpansionStateManager.removeStateListener(mPanelStateListener);
+            mPanelExpansionStateManager.removeExpansionListener(mPanelExpansionListener);
             mPanelExpansionStateManager = null;
         }
         mStatusBarStateController.removeCallback(mShadeStateListener);
@@ -1565,17 +1572,13 @@ public class NavigationBar implements View.OnAttachStateChangeListener,
     }
 
     /**
-     * Hide (alpha 0) the gesture navigation bar while the shade is not fully closed and restore
-     * it when the panel state returns to CLOSED, which also happens after an interrupted
-     * expand/collapse animation. Never hides the bar on the keyguard or in 2/3-button mode.
+     * Hide (alpha 0) the gesture navigation bar while the shade is visible (expansion fraction
+     * above 0) and restore it as soon as the fraction returns to 0, which also happens after an
+     * interrupted expand/collapse animation. Heads-up notifications alone do not hide it.
+     * Never hides the bar on the keyguard or in 2/3-button mode.
      */
     private void reevaluateHiddenForShade() {
-        updateHiddenForShade(mPanelExpansionStateManager != null
-                && !mPanelExpansionStateManager.isClosed() ? -1 /* not closed */ : STATE_CLOSED);
-    }
-
-    private void updateHiddenForShade(int panelState) {
-        final boolean hide = panelState != STATE_CLOSED
+        final boolean hide = mShadeVisible && mPanelExpansionStateManager != null
                 && QuickStepContract.isGesturalMode(mNavBarMode)
                 && mStatusBarStateController.getState() == StatusBarState.SHADE;
         if (hide == mHiddenForShade) return;
