@@ -16,6 +16,7 @@
 
 package com.android.systemui.navigationbar;
 
+import static com.android.systemui.statusbar.phone.panelstate.PanelExpansionStateManagerKt.STATE_CLOSED;
 import static android.app.StatusBarManager.NAVIGATION_HINT_BACK_ALT;
 import static android.app.StatusBarManager.NAVIGATION_HINT_IME_SHOWN;
 import static android.app.StatusBarManager.WINDOW_STATE_HIDDEN;
@@ -141,6 +142,8 @@ import com.android.systemui.statusbar.phone.BarTransitions;
 import com.android.systemui.statusbar.phone.LightBarController;
 import com.android.systemui.statusbar.phone.ShadeController;
 import com.android.systemui.statusbar.phone.StatusBar;
+import com.android.systemui.statusbar.phone.panelstate.PanelExpansionStateManager;
+import com.android.systemui.statusbar.phone.panelstate.PanelStateListener;
 import com.android.systemui.statusbar.policy.DeviceProvisionedController;
 import com.android.wm.shell.legacysplitscreen.LegacySplitScreen;
 import com.android.wm.shell.pip.Pip;
@@ -230,6 +233,25 @@ public class NavigationBar implements View.OnAttachStateChangeListener,
     private boolean mTransientShown;
     private boolean mTransientShownFromGestureOnSystemBar;
     private int mNavBarMode = NAV_BAR_MODE_3BUTTON;
+
+    /**
+     * True while the gesture navigation bar window is made fully transparent (window alpha 0)
+     * because the notification shade is open or moving. With alpha 0 SurfaceFlinger skips the
+     * layer, which keeps the moving shade within the hardware composer's layer budget on
+     * legacy devices (otherwise NotificationShade + NavigationBar fall back to slow GPU
+     * composition). The window itself stays, so insets and gestures are unaffected.
+     */
+    private boolean mHiddenForShade;
+    private PanelExpansionStateManager mPanelExpansionStateManager;
+    private final PanelStateListener mPanelStateListener = state -> updateHiddenForShade(state);
+    private final StatusBarStateController.StateListener mShadeStateListener =
+            new StatusBarStateController.StateListener() {
+                @Override
+                public void onStateChanged(int newState) {
+                    // e.g. the device locks while the shade is open: never stay hidden on keyguard
+                    reevaluateHiddenForShade();
+                }
+            };
     private LightBarController mLightBarController;
     private final LightBarController mMainLightBarController;
     private final LightBarController.Factory mLightBarControllerFactory;
@@ -616,6 +638,12 @@ public class NavigationBar implements View.OnAttachStateChangeListener,
         final Display display = v.getDisplay();
         mNavigationBarView.setComponents(mRecentsOptional);
         mNavigationBarView.setComponents(mStatusBarOptionalLazy.get().get().getPanelController());
+        mPanelExpansionStateManager =
+                mStatusBarOptionalLazy.get().get().getPanelExpansionStateManager();
+        mPanelExpansionStateManager.addStateListener(mPanelStateListener);
+        mStatusBarStateController.addCallback(mShadeStateListener);
+        mHiddenForShade = false;
+        reevaluateHiddenForShade();
         mNavigationBarView.setDisabledFlags(mDisabledFlags1);
         mNavigationBarView.setOnVerticalChangedListener(this::onVerticalChanged);
         mNavigationBarView.setOnTouchListener(this::onNavigationTouch);
@@ -701,6 +729,12 @@ public class NavigationBar implements View.OnAttachStateChangeListener,
         mHandler.removeCallbacks(mEnableLayoutTransitions);
         mNavBarHelper.removeNavTaskStateUpdater(mNavbarTaskbarStateUpdater);
         mPipOptional.ifPresent(mNavigationBarView::removePipExclusionBoundsChangeListener);
+        if (mPanelExpansionStateManager != null) {
+            mPanelExpansionStateManager.removeStateListener(mPanelStateListener);
+            mPanelExpansionStateManager = null;
+        }
+        mStatusBarStateController.removeCallback(mShadeStateListener);
+        mHiddenForShade = false;
         mFrame = null;
         mNavigationBarView = null;
         mOrientationHandle = null;
@@ -1491,6 +1525,7 @@ public class NavigationBar implements View.OnAttachStateChangeListener,
     @Override
     public void onNavigationModeChanged(int mode) {
         mNavBarMode = mode;
+        reevaluateHiddenForShade();
 
         if (!QuickStepContract.isGesturalMode(mode)) {
             // Reset the override alpha
@@ -1527,6 +1562,30 @@ public class NavigationBar implements View.OnAttachStateChangeListener,
 
     public void finishBarAnimations() {
         mNavigationBarView.getBarTransitions().finishAnimations();
+    }
+
+    /**
+     * Hide (alpha 0) the gesture navigation bar while the shade is not fully closed and restore
+     * it when the panel state returns to CLOSED, which also happens after an interrupted
+     * expand/collapse animation. Never hides the bar on the keyguard or in 2/3-button mode.
+     */
+    private void reevaluateHiddenForShade() {
+        updateHiddenForShade(mPanelExpansionStateManager != null
+                && !mPanelExpansionStateManager.isClosed() ? -1 /* not closed */ : STATE_CLOSED);
+    }
+
+    private void updateHiddenForShade(int panelState) {
+        final boolean hide = panelState != STATE_CLOSED
+                && QuickStepContract.isGesturalMode(mNavBarMode)
+                && mStatusBarStateController.getState() == StatusBarState.SHADE;
+        if (hide == mHiddenForShade) return;
+        mHiddenForShade = hide;
+        if (mFrame == null || mNavigationBarView == null
+                || !mNavigationBarView.isAttachedToWindow()) {
+            return;
+        }
+        mWindowManager.updateViewLayout(mFrame, getBarLayoutParams(
+                mContext.getResources().getConfiguration().windowConfiguration.getRotation()));
     }
 
     private WindowManager.LayoutParams getBarLayoutParams(int rotation) {
@@ -1606,6 +1665,9 @@ public class NavigationBar implements View.OnAttachStateChangeListener,
         lp.setTitle("NavigationBar" + mContext.getDisplayId());
         lp.setFitInsetsTypes(0 /* types */);
         lp.setTrustedOverlay();
+        if (mHiddenForShade) {
+            lp.alpha = 0f;
+        }
         return lp;
     }
 
