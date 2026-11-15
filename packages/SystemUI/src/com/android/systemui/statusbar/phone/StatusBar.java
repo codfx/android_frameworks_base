@@ -4346,6 +4346,11 @@ public class StatusBar extends SystemUI implements
         }
         return mStatusBarKeyguardViewManager.isSecure();
     }
+    /** @return the panel expansion state manager (used by the navigation bar). */
+    public PanelExpansionStateManager getPanelExpansionStateManager() {
+        return mPanelExpansionStateManager;
+    }
+
     public NotificationPanelViewController getPanelController() {
         return mNotificationPanelViewController;
     }
