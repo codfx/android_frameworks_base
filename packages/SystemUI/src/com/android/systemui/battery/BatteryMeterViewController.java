@@ -79,7 +79,10 @@ public class BatteryMeterViewController extends ViewController<BatteryMeterView>
             new BatteryController.BatteryStateChangeCallback() {
                 @Override
                 public void onBatteryLevelChanged(int level, boolean pluggedIn, boolean charging) {
-                    mView.onBatteryLevelChanged(level, pluggedIn);
+                    // Show the charging state only while the battery actually charges (or is
+                    // full on the charger), not whenever a charger is connected: a charge
+                    // limiter keeps the charger connected while charging is paused.
+                    mView.onBatteryLevelChanged(level, charging);
                 }
 
                 @Override
