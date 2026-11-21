@@ -322,7 +322,9 @@ public class RecentTasksController implements TaskStackListenerCallback,
                     (controller) -> out[0] = controller.getRecentTasks(maxNum, flags, userId)
                             .toArray(new GroupedRecentTaskInfo[0]),
                     true /* blocking */);
-            return out[0];
+            // The blocking call gives up when the shell main thread does not get to it in time
+            // (e.g. under heavy load), leaving no result. Callers expect an array, never null.
+            return out[0] != null ? out[0] : new GroupedRecentTaskInfo[0];
         }
     }
 }
