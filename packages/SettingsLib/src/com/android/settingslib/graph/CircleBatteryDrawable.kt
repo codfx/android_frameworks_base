@@ -69,6 +69,27 @@ class CircleBatteryDrawable(private val context: Context, frameColor: Int) : Dra
             postInvalidate()
         }
 
+    /** A charge limit has paused charging: draw a heart in place of the bolt. */
+    var limitPaused = false
+        set(value) {
+            field = value
+            postInvalidate()
+        }
+
+    // Heart in a unit square, scaled into the circle while the limit pauses charging
+    // (same shape as ThemedBatteryDrawable's heart, normalised)
+    private val heartUnit = Path().apply {
+        moveTo(0.5f, 1f)
+        lineTo(0.1325f, 0.613f)
+        cubicTo(0f, 0.476f, 0f, 0.256f, 0.1325f, 0.125f)
+        cubicTo(0.259f, 0f, 0.434f, 0.018f, 0.5f, 0.161f)
+        cubicTo(0.566f, 0.018f, 0.741f, 0f, 0.8675f, 0.125f)
+        cubicTo(1f, 0.256f, 1f, 0.476f, 0.8675f, 0.613f)
+        close()
+    }
+    private val heartPath = Path()
+    private val heartMatrix = Matrix()
+
     var showPercent = false
         set(value) {
             field = value
@@ -195,6 +216,12 @@ class CircleBatteryDrawable(private val context: Context, frameColor: Int) : Dra
                 )
             }
             c.drawPath(boltPath, boltPaint)
+        } else if (limitPaused) {
+            val side = frame.width() * 0.5f
+            heartMatrix.setScale(side, side)
+            heartMatrix.postTranslate(frame.centerX() - side / 2f, frame.centerY() - side * 0.5f)
+            heartUnit.transform(heartMatrix, heartPath)
+            c.drawPath(heartPath, boltPaint)
         }
         // draw thin gray ring first
         c.drawArc(frame, 270f, 360f, false, framePaint)
@@ -207,7 +234,7 @@ class CircleBatteryDrawable(private val context: Context, frameColor: Int) : Dra
             }
         }
         // compute percentage text
-        if (!charging && batteryLevel != 100 && showPercent) {
+        if (!charging && !limitPaused && batteryLevel != 100 && showPercent) {
             textPaint.color = getColorForLevel(batteryLevel)
             textPaint.textSize = height * 0.52f
             val textHeight = -textPaint.fontMetrics.ascent

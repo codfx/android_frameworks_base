@@ -23,6 +23,7 @@ import android.content.ContentResolver;
 import android.database.ContentObserver;
 import android.net.Uri;
 import android.os.Handler;
+import android.os.SystemProperties;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.ArraySet;
@@ -82,7 +83,8 @@ public class BatteryMeterViewController extends ViewController<BatteryMeterView>
                     // Show the charging state only while the battery actually charges (or is
                     // full on the charger), not whenever a charger is connected: a charge
                     // limiter keeps the charger connected while charging is paused.
-                    mView.onBatteryLevelChanged(level, charging);
+                    mView.onBatteryLevelChanged(level, charging,
+                            isChargeLimitPaused(level, pluggedIn, charging));
                 }
 
                 @Override
@@ -219,5 +221,23 @@ public class BatteryMeterViewController extends ViewController<BatteryMeterView>
                 mView.updateBatteryStyle();
             }
         }
+    }
+
+    /**
+     * Charging is paused by the device's charge limiter (persist.sys.z3tc.charge_*, set by the
+     * Z3tcChargeLimit app): charger connected, not charging, limiter on and the level at or above
+     * its resume level. The limiter stops charging at the limit and starts again only at the
+     * resume level, so this covers the whole pause. Other "plugged in, not charging" cases (for
+     * example a battery too warm to charge, or below the resume level) do not count. The
+     * battery broadcast that reports the pause triggers this check.
+     */
+    private static boolean isChargeLimitPaused(int level, boolean pluggedIn, boolean charging) {
+        if (!pluggedIn || charging
+                || !"1".equals(SystemProperties.get("persist.sys.z3tc.charge_enable"))) {
+            return false;
+        }
+        // Same defaults as the limiter script: limit 80, resume limit - 5.
+        int limit = SystemProperties.getInt("persist.sys.z3tc.charge_limit", 80);
+        return level >= SystemProperties.getInt("persist.sys.z3tc.charge_resume", limit - 5);
     }
 }

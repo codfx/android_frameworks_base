@@ -85,6 +85,7 @@ public class BatteryMeterView extends LinearLayout implements DarkReceiver {
     private int mLevel;
     private int mShowPercentMode = MODE_DEFAULT;
     private boolean mCharging;
+    private boolean mLimitPaused;
     // Error state where we know nothing about the current battery state
     private boolean mBatteryStateUnknown;
     // Lazily-loaded since this is expected to be a rare-if-ever state
@@ -198,9 +199,12 @@ public class BatteryMeterView extends LinearLayout implements DarkReceiver {
         return false;
     }
 
-    void onBatteryLevelChanged(int level, boolean pluggedIn) {
+    void onBatteryLevelChanged(int level, boolean pluggedIn, boolean limitPaused) {
         mCircleDrawable.setCharging(pluggedIn);
         mThemedDrawable.setCharging(pluggedIn);
+        mCircleDrawable.setLimitPaused(limitPaused);
+        mThemedDrawable.setLimitPaused(limitPaused);
+        mLimitPaused = limitPaused;
         mCircleDrawable.setBatteryLevel(level);
         mThemedDrawable.setBatteryLevel(level);
         mCharging = pluggedIn;
@@ -271,8 +275,7 @@ public class BatteryMeterView extends LinearLayout implements DarkReceiver {
             }
         } else {
             setContentDescription(
-                    getContext().getString(mCharging ? R.string.accessibility_battery_level_charging
-                            : R.string.accessibility_battery_level, mLevel));
+                    getContext().getString(batteryLevelDescription(), mLevel));
         }
     }
 
@@ -283,8 +286,13 @@ public class BatteryMeterView extends LinearLayout implements DarkReceiver {
         mBatteryPercentView.setText(
                 NumberFormat.getPercentInstance().format(mLevel / 100f));
         setContentDescription(
-                getContext().getString(mCharging ? R.string.accessibility_battery_level_charging
-                        : R.string.accessibility_battery_level, mLevel));
+                getContext().getString(batteryLevelDescription(), mLevel));
+    }
+
+    private int batteryLevelDescription() {
+        return mCharging ? R.string.accessibility_battery_level_charging
+                : mLimitPaused ? R.string.accessibility_battery_level_limit_paused
+                : R.string.accessibility_battery_level;
     }
 
     void updateShowPercent() {

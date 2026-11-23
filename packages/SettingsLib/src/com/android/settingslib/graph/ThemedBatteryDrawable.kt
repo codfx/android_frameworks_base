@@ -65,6 +65,10 @@ open class ThemedBatteryDrawable(private val context: Context, frameColor: Int) 
     private val boltPath = Path()
     private val scaledBolt = Path()
 
+    // Heart (used while a charge limit has paused charging)
+    private val heartPath = PathParser.createPathFromPathData(HEART_PATH)
+    private val scaledHeart = Path()
+
     // Plus sign (used for power save mode)
     private val plusPath = Path()
     private val scaledPlus = Path()
@@ -106,6 +110,17 @@ open class ThemedBatteryDrawable(private val context: Context, frameColor: Int) 
             field = value
             postInvalidate()
         }
+
+    /** A charge limit has paused charging: draw a heart in place of the bolt. */
+    var limitPaused = false
+        set(value) {
+            field = value
+            postInvalidate()
+        }
+
+    // The icon cut into the fill: the bolt while charging, the heart while the limit pauses
+    private val fillIcon: Path?
+        get() = if (charging) scaledBolt else if (limitPaused) scaledHeart else null
 
     var showPercent = false
         set(value) {
@@ -214,11 +229,12 @@ open class ThemedBatteryDrawable(private val context: Context, frameColor: Int) 
         fillPaint.color = levelColor
 
         // Deal with unifiedPath clipping before it draws
-        if (charging) {
-            // Clip out the bolt shape
-            unifiedPath.op(scaledBolt, Path.Op.DIFFERENCE)
+        val icon = fillIcon
+        if (icon != null) {
+            // Clip out the bolt (or heart) shape
+            unifiedPath.op(icon, Path.Op.DIFFERENCE)
             if (!invertFillIcon) {
-                c.drawPath(scaledBolt, fillPaint)
+                c.drawPath(icon, fillPaint)
             }
         }
 
@@ -248,12 +264,12 @@ open class ThemedBatteryDrawable(private val context: Context, frameColor: Int) 
             }
         }
 
-        if (charging) {
-            c.clipOutPath(scaledBolt)
+        if (icon != null) {
+            c.clipOutPath(icon)
             if (invertFillIcon) {
-                c.drawPath(scaledBolt, fillColorStrokePaint)
+                c.drawPath(icon, fillColorStrokePaint)
             } else {
-                c.drawPath(scaledBolt, fillColorStrokeProtection)
+                c.drawPath(icon, fillColorStrokeProtection)
             }
         } else if (powerSaveEnabled) {
             // If power save is enabled draw the perimeter path with colorError
@@ -263,7 +279,7 @@ open class ThemedBatteryDrawable(private val context: Context, frameColor: Int) 
         }
         c.restore()
 
-        if (!charging && batteryLevel < 100 && showPercent) {
+        if (icon == null && batteryLevel < 100 && showPercent) {
             textPaint.textSize = bounds.height() * 0.38f
             val textHeight = -textPaint.fontMetrics.ascent
             val pctX = bounds.width() * 0.5f
@@ -403,6 +419,7 @@ open class ThemedBatteryDrawable(private val context: Context, frameColor: Int) 
         scaledFill.computeBounds(fillRect, true)
         boltPath.transform(scaleMatrix, scaledBolt)
         plusPath.transform(scaleMatrix, scaledPlus)
+        heartPath.transform(scaleMatrix, scaledHeart)
 
         // It is expected that this view only ever scale by the same factor in each dimension, so
         // just pick one to scale the strokeWidths
@@ -447,6 +464,10 @@ open class ThemedBatteryDrawable(private val context: Context, frameColor: Int) 
         private const val WIDTH = 12f
         private const val HEIGHT = 20f
         private const val CRITICAL_LEVEL = 15
+        // Heart on the same 12x20 grid as the bolt, centred in the fill area
+        private const val HEART_PATH = "M6,16 L2.95,12.75 C1.85,11.6 1.85,9.75 2.95,8.65 " +
+                "C4,7.6 5.45,7.75 6,8.95 C6.55,7.75 8,7.6 9.05,8.65 C10.15,9.75 10.15,11.6 " +
+                "9.05,12.75 Z"
         // On a 12x20 grid, how wide to make the fill protection stroke.
         // Scales when our size changes
         private const val PROTECTION_STROKE_WIDTH = 3f
