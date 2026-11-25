@@ -309,6 +309,15 @@ public class DisplayPolicy {
     private WindowState mExtraNavBarAlt = null;
     @WindowManagerPolicy.AltBarPosition
     private int mExtraNavBarAltPosition = ALT_BAR_UNKNOWN;
+    // Height of the extra nav bar (the 12L taskbar) used for the non-decor (configuration) insets.
+    // The taskbar's inset is 0 on the home screen and its full height in apps, so using the live
+    // value changes the global configuration (app bounds, screen size) on every home <-> app
+    // switch, which freezes the display and relayouts the launcher. Keep the last non-zero height
+    // instead. Not reset when the window goes away: the launcher re-creates the taskbar window
+    // (once after boot, and on navigation mode, UI mode or asset changes), and the new window
+    // reports its own non-zero height on its first layout. The value is only used while an extra
+    // nav bar window exists.
+    private int mExtraNavBarConfigHeight = 0;
 
     /** See {@link #getNavigationBarFrameHeight} */
     private int[] mNavigationBarFrameHeightForRotationDefault = new int[4];
@@ -2444,7 +2453,17 @@ public class DisplayPolicy {
         if (source == null) {
             return 0;
         }
-        return source.getFrame().height();
+        final int height = source.getFrame().height();
+        if (insetsType != ITYPE_EXTRA_NAVIGATION_BAR) {
+            return height;
+        }
+        // Ignore 0 (taskbar on the home screen) and full-screen heights (taskbar window expanded
+        // for folders or drag and drop): neither is the bar's size.
+        final DisplayInfo info = mDisplayContent.getDisplayInfo();
+        if (height > 0 && height < Math.min(info.logicalWidth, info.logicalHeight) / 3) {
+            mExtraNavBarConfigHeight = height;
+        }
+        return mExtraNavBarConfigHeight;
     }
 
     void notifyDisplayReady() {
